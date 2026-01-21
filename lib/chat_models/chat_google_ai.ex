@@ -376,12 +376,19 @@ defmodule LangChain.ChatModels.ChatGoogleAI do
   end
 
   def for_api(%ToolCall{} = call) do
+    signature =
+      case call.extra_content do
+        %{google: %{thought_signature: sig}} when is_binary(sig) -> sig
+        _ -> nil
+      end
+
     %{
       "functionCall" => %{
         "args" => call.arguments,
         "name" => call.name
       }
     }
+    |> Utils.conditionally_add_to_map("thoughtSignature", signature)
   end
 
   def for_api(%ToolResult{} = result) do
@@ -426,7 +433,7 @@ defmodule LangChain.ChatModels.ChatGoogleAI do
 
     # For functions with no parameters, Google AI needs the parameters field removing, otherwise it will error
     # with "* GenerateContentRequest.tools[0].function_declarations[0].parameters.properties: should be non-empty for OBJECT type\n"
-    if encoded["parameters"] == %{"properties" => %{}, "type" => "object"} do
+    if encoded["parameters"] in [%{"properties" => %{}, "type" => "object"}, %{properties: %{}, type: "object"}] do
       Map.delete(encoded, "parameters")
     else
       encoded
@@ -779,6 +786,13 @@ defmodule LangChain.ChatModels.ChatGoogleAI do
         %{"functionCall" => %{"args" => raw_args, "name" => name}} = data,
         _
       ) do
+    thought_signature =
+      case data do
+        %{"thoughtSignature" => sig} when is_binary(sig) -> sig
+        %{"thought_signature" => sig} when is_binary(sig) -> sig
+        _ -> nil
+      end
+
     %{
       call_id: "call-#{name}",
       name: name,
@@ -786,6 +800,10 @@ defmodule LangChain.ChatModels.ChatGoogleAI do
       complete: true,
       index: data["index"]
     }
+    |> Utils.conditionally_add_to_map(
+      :extra_content,
+      if(is_binary(thought_signature), do: %{google: %{thought_signature: thought_signature}}, else: nil)
+    )
     |> ToolCall.new()
     |> case do
       {:ok, message} ->

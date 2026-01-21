@@ -28,6 +28,8 @@ defmodule LangChain.Message.ToolCall do
     # when the tool call is incomplete, the index indicates which tool call to
     # update on a ToolCall.
     field :index, :integer
+    # Provider-specific metadata (e.g., Gemini 3 `thoughtSignature`).
+    field :extra_content, :map
   end
 
   # https://cookbook.openai.com/examples/how_to_call_functions_with_chat_models
@@ -38,7 +40,7 @@ defmodule LangChain.Message.ToolCall do
 
   @type t :: %ToolCall{}
 
-  @update_fields [:status, :type, :call_id, :name, :arguments, :index]
+  @update_fields [:status, :type, :call_id, :name, :arguments, :index, :extra_content]
   @create_fields @update_fields
 
   @doc """
@@ -151,6 +153,7 @@ defmodule LangChain.Message.ToolCall do
     |> update_call_id(call_part)
     |> update_type(call_part)
     |> update_status(call_part)
+    |> merge_extra_content(call_part)
   end
 
   defp append_tool_name(%ToolCall{name: primary_name} = primary, %ToolCall{name: new_name})
@@ -227,6 +230,26 @@ defmodule LangChain.Message.ToolCall do
   defp append_arguments(%ToolCall{} = primary, %ToolCall{} = _delta_part) do
     # no arguments to merge
     primary
+  end
+
+  defp merge_extra_content(%ToolCall{} = primary, %ToolCall{extra_content: extra})
+       when extra in [nil, %{}] do
+    primary
+  end
+
+  defp merge_extra_content(%ToolCall{extra_content: nil} = primary, %ToolCall{extra_content: extra})
+       when is_map(extra) do
+    %ToolCall{primary | extra_content: extra}
+  end
+
+  defp merge_extra_content(%ToolCall{extra_content: primary_extra} = primary, %ToolCall{extra_content: extra})
+       when is_map(primary_extra) and is_map(extra) do
+    merged =
+      Map.merge(primary_extra, extra, fn _key, v1, v2 ->
+        if is_map(v1) and is_map(v2), do: Map.merge(v1, v2), else: v2
+      end)
+
+    %ToolCall{primary | extra_content: merged}
   end
 
   # The contents and arguments get streamed as a string. A tool call may be part of a delta and it
